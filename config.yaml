@@ -1,0 +1,48 @@
+data_dir: "/mnt/storage5/yfdai/fyp/data"
+tmpdir: "/mnt/storage3/yfdai/tmp"
+
+groups:
+  - control
+  - exp
+
+fastq_screen_conf:
+  control: "/mnt/storage5/yfdai/fyp/database/configuration_fastas/control.conf"
+  exp: "/mnt/storage5/yfdai/fyp/database/configuration_fastas/exp.conf"
+
+bowtie2_index:
+  control: "/mnt/storage5/yfdai/fyp/database/control/control"
+  exp: "/mnt/storage5/yfdai/fyp/database/new/exp"
+
+coverm_ref:
+  control: "/mnt/storage5/yfdai/fyp/database/control/control.fna"
+  exp: "/mnt/storage5/yfdai/fyp/database/new/ref_Acropora_allSymb_comb.fa"
+
+kaiju:
+  nodes: "/mnt/storage3/thliao/data/kaiju_db/nodes.dmp"
+  names: "/mnt/storage3/thliao/data/kaiju_db/names.dmp"
+  db: "/mnt/storage3/thliao/data/kaiju_db/kaiju_db_nr_euk.fmi"
+
+threads:
+  fastq_screen: 16
+  fastp: 16
+  bowtie2_map: 32
+  bowtie2_filter: 16
+  bam_to_fastq: 30
+  coverm: 60
+  megahit: 60
+  bt2_build_contigs: 10
+  remap_contigs: 40
+  pcr_dedup: 40
+  spades_control: 48
+  spades_pcr: 64
+  remap_final_contigs: 48
+  unitem: 64
+  comebin: 96
+  metadecoder_cov: 64
+  metadecoder_seed: 64
+  metadecoder_cluster: 20
+  semibin: 64
+  refinem: 64
+  checkm: 96
+  gtdbtk: 64
+  kaiju: 64
