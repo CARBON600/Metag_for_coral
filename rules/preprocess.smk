@@ -18,7 +18,6 @@ rule fastq_screen:
         r"""
         mkdir -p {params.outdir}
         # NOTE:
-        # Please verify fastq_screen paired-end CLI on your installed version.
         fastq_screen \
           --conf {params.conf} \
           --outdir {params.outdir} \
@@ -132,8 +131,6 @@ rule coverm_map:
         r"""
         mkdir -p $(dirname {output.bam})
         export TMPDIR={params.tmpdir}
-        # NOTE:
-        # verify output behavior of your installed coverm version.
         coverm make \
             -r {params.ref} \
             -1 {input.r1} \
