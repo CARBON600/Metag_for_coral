@@ -1,6 +1,21 @@
 data_dir: "/mnt/storage5/yfdai/fyp/data"
 tmpdir: "/mnt/storage3/yfdai/tmp"
 
+filter_methods:
+  - bt2
+  - coverm
+  - fastqs
+
+assembly_treats:
+  - control_assemble
+  - PCR_assemble
+
+binners:
+  - unitem
+  - comebin
+  - metadecoder
+  - semibin2_single
+
 groups:
   - control
   - exp
