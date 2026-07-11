@@ -22,6 +22,7 @@ rule fastq_screen:
           --conf {params.conf} \
           --outdir {params.outdir} \
           --nohits \
+          --tag \
           --aligner bowtie2 \
           {input.r1} {input.r2}
 
@@ -110,6 +111,8 @@ rule bam_to_fastq_bt2:
             -0 /dev/null -s /dev/null \
             {params.tmpbam}
         rm -f {params.tmpbam}
+        test -s {output.r1}
+        test -s {output.r2}
         """
 
 # ---------------------------------------
@@ -183,6 +186,8 @@ rule bam_to_fastq_coverm:
             -0 /dev/null -s /dev/null \
             {params.tmpbam}
         rm -f {params.tmpbam}
+        test -s {output.r1}
+        test -s {output.r2}
         """
 
 # ---------------------------------------

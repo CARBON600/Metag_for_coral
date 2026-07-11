@@ -23,6 +23,7 @@ rule megahit_pre:
           --out-prefix {params.prefix} \
           -t {threads} \
           --min-contig-len 250
+        test -s {output}/{params.prefix}.contigs.fa
         """
 
 rule build_megahit_bt2_index:
@@ -100,6 +101,14 @@ rule pcr_dedup:
             -2 {output.r2} \
             -0 /dev/null -s /dev/null \
             {params.name_bam}
+
+        test -s {output.dedup_bam}
+        test -s {output.r1}
+        test -s {output.r2}
+
+        rm -f {params.sorted_bam} {params.sorted_bam}.bai
+        rm -f {params.markdup_bam}
+        rm -f {params.name_bam}
         """
 
 # ---------------------------------------
@@ -107,10 +116,8 @@ rule pcr_dedup:
 # uses filtered reads directly
 rule spades_control_assemble:
     input:
-        r1=lambda wc: f"output/fastqs/{wc.group}/{wc.sample}/{wc.sample}_1_cleaned.fastq.gz" if wc.method == "fastqs"
-                      else f"output/fq4dep/{wc.method}/{wc.group}/{wc.sample}_1.fq.gz",
-        r2=lambda wc: f"output/fastqs/{wc.group}/{wc.sample}/{wc.sample}_2_cleaned.fastq.gz" if wc.method == "fastqs"
-                      else f"output/fq4dep/{wc.method}/{wc.group}/{wc.sample}_2.fq.gz"
+        r1=filtered_r1,
+        r2=filtered_r2
     output:
         directory("output/assemble/control_assemble/{method}/{group}/{sample}")
     threads: config["threads"]["spades_control"]
@@ -126,6 +133,7 @@ rule spades_control_assemble:
           --only-assembler \
           -t {threads} \
           -o {output}
+        test -s {output}/contigs.fasta
         """
 
 # ---------------------------------------
@@ -150,6 +158,7 @@ rule spades_pcr_assemble:
           --only-assembler \
           -t {threads} \
           -o {output}
+        test -s {output}/contigs.fasta
         """
 
 # ---------------------------------------
@@ -212,4 +221,7 @@ rule remap_reads_to_final_contigs:
         samtools sort -@ {threads} -o {output.bam} {params.rawbam}
         samtools index {output.bam}
         rm -f {params.rawbam}
+
+        test -s {output.bam}
+        test -s {output.bai}
         """
