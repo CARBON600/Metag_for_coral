@@ -1,111 +1,120 @@
 # Standardizing a Bioinformatic Analysis Pipeline for Coral Metagenomics
-> Genome-resolved benchmarking of wet-lab protocols and bioinformatic workflow components to improve MAG recovery from coral holobiont metagenomes.
-## Overview
-Coral holobiont metagenomes are often dominated by coral host and Symbiodiniaceae DNA, limiting genome-resolved recovery of microbial members.  
-This project benchmarks integrated **wet lab + bioinformatic** workflow combinations to optimize **metagenome-assembled genome (MAG)** recovery, quality and downstream functional interpretability.
-The workflow is written in [Snakemake](https://snakemake.github.io/) and supports
-conda-based dependency management. It is designed for Linux HPC clusters (with or
-without Slurm).
 
-## Pipeline Summary
+This repository is a Snakemake workflow for genome-resolved metagenomics of
+coral holobiont samples. It removes coral host and Symbiodiniaceae reads,
+assembles the remaining reads, recovers metagenome-assembled genomes (MAGs)
+with four binners, and assesses their quality and taxonomy. 
+
+Maintainer: `DAI Yifan` (`yidai204@gmail.com`).
+
+## Experimental design
+
+Each sample corresponds to one wet-lab protocol. The workflow enumerates every
+combination of the following factors:
+
+- host-read removal: `bt2`, `coverm`, `fastqs`
+- library treatment: `control_assemble` (no PCR deduplication), `PCR_assemble` (PCR deduplication)
+- reference database group: `control` (control database), `exp` (custom *Acropora* + Symbiodiniaceae database)
+- binner: `unitem`, `comebin`, `metadecoder`, `semibin2_single`
+
+That is `3 × 2 × 2 × 4 = 48` pipeline runs per sample. The four component
+lists are defined in `config.yaml` and read by the `Snakefile`, so any subset
+can be selected.
+
+Dereplication (dRep), functional annotation (Prokka/KofamScan) and the
+statistical comparison of MAG sets are performed downstream in a separate
+notebook and are not part of this workflow.
+
+## Pipeline
 
 ```
-Raw Reads (paired-end)
-|
-├── FastQ-Screen + fastp ──────────┐
-├── Bowtie2 → unmapped → FASTQ ────┤
-└── CoverM → inverse filter ───────┤
-                                    ▼
-                           Filtered Reads
-                                    │
-                    ┌───────────────┴───────────────┐
-                    │                               │
-              MEGAHIT pre-assembly            SPAdes meta assembly
-           (ref for PCR dedup)              (control – no dedup)
-                    │                               │
-              PCR deduplication                     │
-           (samtools markdup)                       │
-                    │                               │
-              SPAdes meta assembly                  │
-              (PCR-assemble)                        │
-                    │                               │
-                    └───────────┬───────────────────┘
-                                ▼
-                     contigs ≥ 2 000 bp
-                                │
-                        Bowtie2 re-mapping
-                                │
-          ┌──────────────┬──────┴──────┬──────────────────┐
-          ▼              ▼             ▼                  ▼
-       UniT          COMEBin      MetaDecoder         SemiBin2
-          │              │             │                  │
-          └──────────────┴──────┬──────┴──────────────────┘
-                                ▼
-                          RefineM
-                      (filter bins)
-                                │
-                    ┌───────────┴───────────┐
-                    ▼                       ▼
-              CheckM lineage_wf      GTDB-Tk classify_wf
-                    │                       │
-                    └───────────┬───────────┘
-                                ▼
-                          Kaiju taxonomy
-                         (on raw reads)
+Raw reads
+  → host removal (bt2 | coverm | fastqs)
+  → MEGAHIT pre-assembly → samtools markdup → SPAdes   (PCR_assemble)
+  → SPAdes                                             (control_assemble)
+  → contigs ≥ 2000 bp → Bowtie2 re-mapping
+  → binning (UniT | COMEBin | MetaDecoder | SemiBin2)
+  → prepare_bins → RefineM → CheckM / GTDB-Tk
 ```
 
----
+Kaiju taxonomic profiling is disabled.
 
 ## Requirements
 
-| Category | Requirement |
-|----------|-------------|
-| **OS** | Linux (conda environments pinned to `linux-64`) |
-| **Snakemake** | ≥ 7.0 |
-| **Conda** | Miniconda or Anaconda |
-| **Storage** | ≥ 500 GB recommended |
+| Item | Requirement |
+|------|-------------|
+| OS | Linux (conda environments pinned to `linux-64`) |
+| Snakemake | ≥ 7.0 |
+| Conda | Miniconda, Anaconda, or Mamba |
+| Storage | ≥ 500 GB recommended |
 
-### Reference Databases
+### Conda environments
 
-| Resource | Purpose | Used by |
-|----------|---------|---------|
-| Bowtie2 index | Host-read removal | `bt2` method |
-| CoverM reference FASTA | Host-read removal | `coverm` method |
-| FastQ-Screen config file | Multi-genome host screening | `fastqs` method |
-| Kaiju DB | Taxonomic profiling | `kaiju_raw` (`nodes.dmp`, `names.dmp`, `.fmi`) |
-
----
-
-## Quick Start
-
-### 1. Clone and install
+Dependencies are split into one environment per tool family (the tools require
+incompatible Python versions). The rules reference these environments by name;
+`run.sh` creates any that are missing from the matching specification under
+`envs/`, and reuses the ones that already exist. To create them manually:
 
 ```bash
-git clone <repo-url>
-cd Metag_for_coral-main
-
-# Let Snakemake handle environments automatically (recommended), or:
 conda env create -f envs/metag.yml
+conda env create -f envs/megahit.yml
 conda env create -f envs/binning.yml
+conda env create -f envs/comebin_env.yml
+conda env create -f envs/metadecoder.yml
+conda env create -f envs/SemiBin.yml
+conda env create -f envs/gtdbtk-2.3.2.yml
 ```
 
-### 2. Edit `config.yaml`
+Because Snakemake reuses these named environments, editing a specification does
+not rebuild the environment automatically; refresh it explicitly with
+`conda env update -n <name> -f envs/<name>.yml` (or remove and recreate it).
 
-Set your paths, reference databases, and choose which tools to run:
+| Environment | Steps |
+|-------------|-------|
+| `metag` | host removal (`bt2`, `coverm`, `fastqs`), fastp, PCR dedup, SPAdes, contig filtering/remapping |
+| `megahit` | MEGAHIT pre-assembly |
+| `binning` | UniT, RefineM, CheckM, bin preparation |
+| `comebin_env` | COMEBin |
+| `metadecoder` | MetaDecoder |
+| `SemiBin` | SemiBin2 |
+| `gtdbtk-2.3.2` | GTDB-Tk |
+
+### External tools
+
+FastQ-Screen and SPAdes are invoked from absolute paths configured in
+`config.yaml` (`software:`), with the original notebook paths as defaults:
+
+| Tool | Config key |
+|------|------------|
+| FastQ-Screen 0.14.1 | `software.fastq_screen` |
+| SPAdes 3.15.5 | `software.spades` |
+
+### Reference databases
+
+| Resource | Purpose | Used by | Config key |
+|----------|---------|---------|------------|
+| Bowtie2 index | Host-read removal | `bt2` | `bowtie2_index` |
+| CoverM reference FASTA | Host-read removal | `coverm` | `coverm_ref` |
+| FastQ-Screen config | Multi-genome host screening | `fastqs` | `fastq_screen_conf` |
+| GTDB-Tk reference data | Taxonomic classification | `gtdbtk` | `gtdbtk_data` |
+| CheckM reference data | Completeness / contamination | `checkm` | `checkm_data` |
+
+## Configuration
+
+Edit `config.yaml`:
 
 ```yaml
 data_dir: "/path/to/raw/data"      # contains *_1.fq.gz / *_2.fq.gz
 tmpdir:   "/path/to/tmp"
 
-# ── Workflow components (comment out to skip) ──
 filter_methods:
   - bt2
   - coverm
   - fastqs
 
 assembly_treats:
-  - control_assemble       # no PCR dedup
-  - PCR_assemble           # with PCR dedup
+  - control_assemble
+  - PCR_assemble
 
 binners:
   - unitem
@@ -113,7 +122,10 @@ binners:
   - metadecoder
   - semibin2_single
 
-# ── Reference databases ──
+groups:
+  - control
+  - exp
+
 bowtie2_index:
   control: "/path/to/control/control"
   exp:     "/path/to/exp/exp"
@@ -126,124 +138,92 @@ fastq_screen_conf:
   control: "/path/to/control.conf"
   exp:     "/path/to/exp.conf"
 
-kaiju:
-  nodes: "/path/to/kaiju/nodes.dmp"
-  names: "/path/to/kaiju/names.dmp"
-  db:    "/path/to/kaiju/kaiju_db_nr_euk.fmi"
+software:
+  fastq_screen: "/path/to/FastQ-Screen-0.14.1/fastq_screen"
+  spades:       "/path/to/spades/bin/spades.py"
 
-# ── Threads (per rule) ──
+gtdbtk_data: "/path/to/gtdb/releaseXXX"          # sets GTDBTK_DATA_PATH
+checkm_data: "/path/to/checkm/data"              # sets CHECKM_DATA_PATH
+
 threads:
   fastq_screen: 16
   fastp: 16
   bowtie2_map: 32
-  # ... (see config.yaml for full list)
+  # ... see config.yaml for the full list
 ```
 
-### 3. Dry-run
+The three component lists are read directly by the `Snakefile`; commenting out
+a value prunes that branch of the DAG.
+
+## Running
+
+`run.sh` checks for the seven named environments and creates any that are
+missing from `envs/*.yml`, then runs Snakemake with the conda frontend set to
+`conda`. Any arguments are passed through to Snakemake:
 
 ```bash
-snakemake --use-conda -n
-```
+# Validate the DAG
+bash run.sh -n
 
-### 4. Run
-
-```bash
 # Single node
-snakemake --use-conda --cores 128 --keep-going
+bash run.sh --cores 128 --keep-going
 
-# Slurm cluster
-snakemake --use-conda --jobs 50 --keep-going \
+# Slurm (Snakemake 7.x)
+bash run.sh --jobs 50 --keep-going \
     --cluster "sbatch --cpus-per-task={threads} --mem=64G --time=48:00:00" \
     --latency-wait 120
+
+# Resume after a failure
+bash run.sh --cores 128 --keep-going --rerun-incomplete
+
+# Rule graph
+bash run.sh -n --rulegraph | dot -Tpng > rulegraph.png
 ```
 
-### 5. Resume after failure
+To call Snakemake directly instead, keep the frontend explicit:
+`snakemake --use-conda --conda-frontend conda ...`.
 
-```bash
-snakemake --use-conda --cores 128 --keep-going --rerun-incomplete
-```
+`run.sh` must be run from the repository and needs `conda` on `PATH` (activate
+your base or snakemake environment first).
 
-### 6. Visualise DAG
-
-```bash
-snakemake --use-conda -n --dag | dot -Tpng > dag.png
-```
-
----
-
-## Selecting Subsets of Tools
-
-Edit the three lists in `config.yaml` to control which components run:
+Selecting a subset is done by editing the lists in `config.yaml`:
 
 ```yaml
-# Compare only bt2 vs coverm, two binners, skip PCR dedup
-filter_methods:
-  - bt2
-  - coverm
-
-assembly_treats:
-  - control_assemble
-
-binners:
-  - unitem
-  - semibin2_single
+filter_methods: [bt2, coverm]
+assembly_treats: [control_assemble]
+binners: [unitem, semibin2_single]
 ```
 
-Snakemake's demand-driven execution ensures only the required rules run —
-irrelevant dependency chains are automatically pruned.
+## Input data
 
----
+Place paired-end reads under `data_dir` as `{sample}_1.fq.gz` and
+`{sample}_2.fq.gz`. Samples are discovered by globbing `{sample}_1.fq.gz` and
+are processed against every `group`. Sample identifiers should not contain
+`_1`/`_2` motifs that the pairing convention could misread.
 
-## Input Data
-
-Place paired-end FASTQ files under `data_dir`:
-
-```
-{SAMPLE}_1.fq.gz
-{SAMPLE}_2.fq.gz
-```
-
-Samples are discovered by globbing `{sample}_1.fq.gz`. Each sample is processed
-through all `groups` using group-specific reference databases.
-
----
-
-## Output Structure
+## Output
 
 ```
 output/
 ├── fastqs/                 FastQ-Screen + fastp
-│   └── {group}/{sample}/
 ├── bt2/                    Bowtie2 mapped BAM
-│   └── {group}/
 ├── bt2_unmapped/           Bowtie2 unmapped (-f 4)
-│   └── {group}/
 ├── coverm/                 CoverM mapped BAM
-│   └── {group}/
 ├── coverm_filtered/        CoverM inverse-filtered BAM
-│   └── {group}/
 ├── fq4dep/                 Filtered FASTQ for assembly
-│   ├── bt2/{group}/{sample}/
-│   └── coverm/{group}/{sample}/
-├── PCR_free/               MEGAHIT pre-assembly + remapping
-│   └── {method}/{group}/{sample}/
+├── megahit_pre/            MEGAHIT pre-assembly
+├── PCR_free/               Bowtie2 index + BAM vs MEGAHIT contigs
 ├── PCR_done/               PCR-deduplicated reads
-│   └── {method}/{group}/{sample}/
-├── assemble/               SPAdes contigs + filtered + BAM
-│   └── {treat}/{method}/{group}/{sample}/
+├── assemble/               SPAdes contigs, ≥2000 bp contigs, sorted BAM
 ├── binning/                Binner outputs
-│   └── {binner}/{treat}/{method}/{group}/{sample}/
+├── bins_prepared/          Decompressed / cleaned bins for QC
 ├── refinem/                RefineM-filtered bins
-│   └── {binner}/{treat}/{method}/{group}/{sample}/
 ├── checkm/                 CheckM results
-│   └── {binner}/{treat}/{method}/{group}/{sample}/
 ├── gtdb/                   GTDB-Tk results
-│   └── {binner}/{treat}/{method}/{group}/{sample}/
-└── kaiju/                  Kaiju taxonomic summaries
-    └── raw/{sample}_kaiju_summary.tsv
+└── logs/                   Per-rule logs
 ```
 
-### Wildcard Key
+Wildcard values:
 
 | Wildcard | Values |
 |----------|--------|
@@ -252,89 +232,95 @@ output/
 | `{treat}` | `control_assemble`, `PCR_assemble` |
 | `{binner}` | `unitem`, `comebin`, `metadecoder`, `semibin2_single` |
 
----
+## Workflow details
 
-## Workflow Details
-
-### Stage 1 — Host-Read Removal
+### Host-read removal
 
 | Method | Tool(s) | Strategy |
 |--------|---------|----------|
-| `bt2` | Bowtie2 | Map to host reference → keep unmapped (`samtools view -f 4`) → FASTQ |
-| `coverm` | CoverM | Map to host reference → inverse filter (≥75% aligned, ≥95% identity) → FASTQ |
-| `fastqs` | FastQ-Screen + fastp | Screen against multi-genome config (`--nohits --tag`) → fastp QC |
+| `bt2` | Bowtie2 | Map to host reference, keep unmapped (`samtools view -f 4`), convert to FASTQ |
+| `coverm` | CoverM | `coverm make` to a directory, then inverse filter (≥75% aligned, ≥95% identity) |
+| `fastqs` | FastQ-Screen + fastp | Screen against the multi-genome config (`--nohits`), then fastp QC |
 
-### Stage 2 — Assembly
+### Assembly
 
-| Treatment | Input | PCR Dedup |
+| Treatment | Input | PCR dedup |
 |-----------|-------|-----------|
 | `control_assemble` | Filtered reads | No |
 | `PCR_assemble` | Reads after MEGAHIT pre-assembly + `samtools markdup` | Yes |
 
-MEGAHIT pre-assembly (`--min-contig-len 250`) generates contigs used solely as
-a reference for PCR duplicate marking. **SPAdes** (`--meta`,
+MEGAHIT pre-assembly (`--min-contig-len 250`) produces contigs used only as a
+reference for PCR duplicate marking; SPAdes (`--meta`,
 `-k 21,33,55,77,99,127`) is the final assembler for both treatments. Contigs
-shorter than 2 000 bp are discarded before binning.
+shorter than 2000 bp are discarded before binning.
 
-### Stage 3 — Binning
+### Binning
 
-| Tool | Approach |
-|------|----------|
-| **UniT** | Ensemble of MetaBAT2 + MaxBin2; consensus binning |
-| **COMEBin** | Contrastive multi-view representation learning |
-| **MetaDecoder** | Two-layer DPGMM + k-mer frequency model (`--disable_gpu`) |
-| **SemiBin2** | Self-supervised contrastive learning (`single_easy_bin --self-supervised`) |
+| Tool | Environment | Approach |
+|------|-------------|----------|
+| UniT | `binning` | Ensemble of MetaBAT2 + MaxBin2 (consensus) |
+| COMEBin | `comebin_env` | Contrastive multi-view representation learning |
+| MetaDecoder | `metadecoder` | Two-layer DPGMM + k-mer frequency model |
+| SemiBin2 | `SemiBin` | Self-supervised contrastive learning (`single_easy_bin --self-supervised`) |
 
-### Stage 4 — Quality Assessment
+### Bin preparation and quality assessment
+
+`prepare_bins` normalises each binner's output into `output/bins_prepared/`:
+gzipped bins from UniT (`*.fna.gz`) and SemiBin2 (`*.fa.gz`) are decompressed,
+and only bin FASTA files are copied, so `.COVERAGE`/`.SEED`/`*.tsv` files do not
+reach downstream tools. Bin extensions: UniT `.fna`, COMEBin `.fa`,
+MetaDecoder `.fasta`, SemiBin2 `.fa`.
 
 | Tool | Function |
 |------|----------|
-| **RefineM** | Scaffold statistics → outlier detection → bin filtering |
-| **CheckM** | Lineage-specific completeness & contamination (`lineage_wf`) |
-| **GTDB-Tk** | Taxonomic classification (`classify_wf --skip_ani_screen`) |
+| RefineM | Scaffold statistics, outlier detection, bin filtering |
+| CheckM | Lineage-specific completeness and contamination (`lineage_wf`) |
+| GTDB-Tk | Taxonomic classification (`classify_wf --skip_ani_screen`) |
 
-### Stage 5 — Taxonomic Profiling
+## Deployment on a new machine
 
-| Tool | Input | Output |
-|------|-------|--------|
-| **Kaiju** | Raw reads | Phylum-level summary table (`kaiju2table -r phylum`) |
+1. Install Miniconda/Mamba and Snakemake ≥ 7 (`mamba create -n snakemake -c bioconda -c conda-forge snakemake=7.32.4`).
+2. Clone the repository and place the paired-end reads under `data_dir`.
+3. Provide the external tools and reference databases, then update every path in `config.yaml` (`data_dir`, `tmpdir`, `bowtie2_index`, `coverm_ref`, `fastq_screen_conf`, `software`, `gtdbtk_data`, `checkm_data`) and adjust `threads`.
+4. Create the seven environments (`mamba env create -f envs/<name>.yml`) or let `run.sh` create the missing ones on first use.
+5. Validate the DAG (`bash run.sh -n`), then run with `bash run.sh ...`; resume with `--rerun-incomplete`.
 
----
+The `check_inputs` rule verifies that all configured input paths exist before
+any long job starts.
 
-## Design Notes
+### Troubleshooting
 
-- The `rule all` target covers the full factorial design:  
-  `filter_methods × assembly_treats × groups × binners × samples`
-- `--keep-going` ensures one sample's failure does not block others.
-- Intermediate large BAM files from PCR deduplication are automatically cleaned.
-- Conda environments are split into `metag` (preprocess + assembly) and
-  `binning` (binning + QC) to avoid dependency conflicts between tool versions.
-- Output integrity is checked with `test -s` after critical steps (assembly,
-  remapping, FASTQ conversion).
-
----
+| Symptom | Probable cause | Remedy |
+|---|---|---|
+| `Nothing to be done` | `data_dir` contains no `{sample}_1.fq.gz`, so `SAMPLES` is empty | correct `data_dir` |
+| `FileNotFoundError` for a reference or tool | a path in `config.yaml` was not updated | update `config.yaml` |
+| `check_inputs` fails | one of the configured paths does not exist | read the log under `logs/check_inputs.log` |
+| CheckM reports the data folder is unset | `CHECKM_DATA_PATH` not configured | set `checkm_data`, or run `checkm data setRoot <dir>` once |
+| `The 'mamba' command is not available` | Snakemake's default conda frontend is `mamba` | use `run.sh` (sets `--conda-frontend conda`) or install mamba |
+| `Conda must be version 24.7.1 or later` | a Snakemake 8.x install requires a newer conda | pin Snakemake 7.32.4 (see above) or upgrade conda |
+| Conda environment creation fails | `defaults` ToS, network, or a missing build | accept the ToS, use a mirror, or relax pins |
+| SPAdes exits with a Python error | interpreter mismatch of the external script | invoke via `conda run -n <env>` or install SPAdes into the environment |
+| Disk exhaustion | `tmpdir` or `output/` under-provisioned | relocate to larger storage |
 
 ## Tools
 
-| Tool | Version | Reference |
-|------|---------|-----------|
-| MEGAHIT | 1.2.9 | Li et al., 2015 |
-| SPAdes | meta | Bankevich et al., 2012 |
-| Bowtie2 | 2.5.4 | Langmead & Salzberg, 2012 |
-| CoverM | 0.7.0 | Aroney et al., 2025 |
-| FastQ-Screen | – | Wingett & Andrews, 2018 |
-| fastp | – | Chen et al., 2018 |
-| samtools | 1.18 | Danecek et al., 2021 |
-| UniT | 1.0.2 | Parks et al. |
-| COMEBin | 1.0.4 | Wang et al., 2024 |
-| MetaDecoder | 1.2.1 | Liu et al., 2022 |
-| SemiBin2 | 2.2.0 | Pan et al., 2023 |
-| RefineM | 0.1.2 | Parks et al. |
-| CheckM | 1.2.3 | Parks et al., 2015 |
-| GTDB-Tk | – | Chaumeil et al., 2020 |
-| Kaiju | – | Menzel et al., 2016 |
-
----
+| Tool | Version | Environment | Reference |
+|------|---------|-------------|-----------|
+| MEGAHIT | 1.2.9 | `megahit` | Li et al., 2015 |
+| SPAdes | 3.15.5 | external | Bankevich et al., 2012 |
+| Bowtie2 | 2.5.4 | `metag` | Langmead & Salzberg, 2012 |
+| CoverM | 0.7.0 | `metag` | Aroney et al., 2025 |
+| FastQ-Screen | 0.14.1 | external | Wingett & Andrews, 2018 |
+| fastp | 1.3.7 | `metag` | Chen et al., 2018 |
+| samtools | 1.18 | `metag` | Danecek et al., 2021 |
+| UniT | 1.0.2 | `binning` | Parks et al. |
+| COMEBin | 1.0.4 | `comebin_env` | Wang et al., 2024 |
+| MetaDecoder | 1.2.1 | `metadecoder` | Liu et al., 2022 |
+| SemiBin2 | 2.2.0 | `SemiBin` | Pan et al., 2023 |
+| RefineM | 0.1.2 | `binning` | Parks et al. |
+| CheckM | 1.2.3 | `binning` | Parks et al., 2015 |
+| GTDB-Tk | 2.3.2 | `gtdbtk-2.3.2` | Chaumeil et al., 2020 |
+| Kaiju | – | disabled | Menzel et al., 2016 |
 
 ## License
 

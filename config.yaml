@@ -32,6 +32,21 @@ coverm_ref:
   control: "/mnt/storage5/yfdai/fyp/database/control/control.fna"
   exp: "/mnt/storage5/yfdai/fyp/database/new/ref_Acropora_allSymb_comb.fa"
 
+# External (non-conda) tools, absolute paths
+software:
+  fastq_screen: "/home-user/thliao/software/FastQ-Screen-0.14.1/fastq_screen"
+  spades: "/home-user/software/spades/v3.15.5/bin/spades.py"
+
+# GTDB-Tk reference database directory (assigned to GTDBTK_DATA_PATH)
+gtdbtk_data: "/mnt/home-db/pub/gtdb/release214"
+
+# CheckM reference data root (assigned to CHECKM_DATA_PATH). Must already be
+# populated by `checkm data setRoot <dir>` (or equivalent); it is not shipped in
+# any conda environment.
+checkm_data: "/home-user/yfdai/profile/download/Anaconda3/envs/drep/checkm_data"
+
+# NOTE: Kaiju is currently disabled. Its rule is commented out in
+# rules/preprocess.smk and its target is absent from `rule all`.
 kaiju:
   nodes: "/mnt/storage3/thliao/data/kaiju_db/nodes.dmp"
   names: "/mnt/storage3/thliao/data/kaiju_db/names.dmp"
