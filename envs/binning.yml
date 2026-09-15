@@ -1,12 +1,9 @@
 name: binning
 channels:
-  - cruizperez
-  - ursky
   - bioconda
   - conda-forge
   - defaults
   - r
-  - salilab
 dependencies:
   - _libgcc_mutex=0.1=conda_forge
   - _openmp_mutex=4.5=2_gnu
@@ -233,4 +230,4 @@ dependencies:
   - zstd=1.5.7=hb8e6e7a_2
   - pip:
       - unitem==1.0.2
-prefix: /home-user/yfdai/profile/download/Anaconda3/envs/binning
+# prefix omitted for portability
