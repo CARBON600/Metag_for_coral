@@ -1,29 +1,33 @@
-# ---------------------------------------
-# MEGAHIT pre-assembly
-# method: bt2 / coverm / fastqs
-# group : control / exp
 rule megahit_pre:
     input:
         r1=filtered_r1,
         r2=filtered_r2
     output:
-        directory("output/megahit_pre/{method}/{group}/{sample}")
+        contigs="output/megahit_pre/{method}/{group}/{sample}/{sample}.contigs.fa"
     threads: config["threads"]["megahit"]
     conda:
-        "envs/metag.yaml"
+        "megahit"
+    resources:
+        mem_mb=32000
+    log:
+        "logs/megahit_pre/{method}/{group}/{sample}.log"
     params:
-        prefix=lambda wc: wc.sample
+        prefix=lambda wc: wc.sample,
+        outdir=lambda wc: f"output/megahit_pre/{wc.method}/{wc.group}/{wc.sample}"
     shell:
         r"""
-        mkdir -p {output}
+        mkdir -p $(dirname {log})
+        exec > {log} 2>&1
+        rm -rf {params.outdir}
+        mkdir -p {params.outdir}
         megahit \
           -1 {input.r1} \
           -2 {input.r2} \
-          -o {output} \
+          -o {params.outdir} \
           --out-prefix {params.prefix} \
           -t {threads} \
           --min-contig-len 250
-        test -s {output}/{params.prefix}.contigs.fa
+        test -s {output.contigs}
         """
 
 rule build_megahit_bt2_index:
@@ -33,11 +37,17 @@ rule build_megahit_bt2_index:
         done="output/PCR_free/index/{method}/{group}/{sample}/build.done"
     threads: config["threads"]["bt2_build_contigs"]
     conda:
-        "envs/metag.yaml"
+        "metag"
+    resources:
+        mem_mb=8000
+    log:
+        "logs/build_megahit_bt2_index/{method}/{group}/{sample}.log"
     params:
         prefix=lambda wc: f"output/PCR_free/index/{wc.method}/{wc.group}/{wc.sample}/{wc.sample}"
     shell:
         r"""
+        mkdir -p $(dirname {log})
+        exec > {log} 2>&1
         mkdir -p $(dirname {params.prefix})
         bowtie2-build {input.contigs} {params.prefix}
         touch {output.done}
@@ -52,19 +62,22 @@ rule remap_to_megahit_contigs:
         bam="output/PCR_free/{method}/{group}/{sample}.bam"
     threads: config["threads"]["remap_contigs"]
     conda:
-        "envs/metag.yaml"
+        "metag"
+    resources:
+        mem_mb=16000
+    log:
+        "logs/remap_to_megahit_contigs/{method}/{group}/{sample}.log"
     params:
         prefix=lambda wc: f"output/PCR_free/index/{wc.method}/{wc.group}/{wc.sample}/{wc.sample}"
     shell:
         r"""
+        mkdir -p $(dirname {log})
+        exec > {log} 2>&1
         mkdir -p $(dirname {output.bam})
         bowtie2 -p {threads} -x {params.prefix} -1 {input.r1} -2 {input.r2} \
           | samtools view -@ {threads} -bS - > {output.bam}
         """
 
-# ---------------------------------------
-# PCR dedup and export deduplicated reads
-# ---------------------------------------
 rule pcr_dedup:
     input:
         bam="output/PCR_free/{method}/{group}/{sample}.bam"
@@ -75,13 +88,19 @@ rule pcr_dedup:
         stats="output/PCR_done/{method}/{group}/{sample}_stats_file.txt"
     threads: config["threads"]["pcr_dedup"]
     conda:
-        "envs/metag.yaml"
+        "metag"
+    resources:
+        mem_mb=16000
+    log:
+        "logs/pcr_dedup/{method}/{group}/{sample}.log"
     params:
         sorted_bam=lambda wc: f"output/PCR_done/{wc.method}/{wc.group}/{wc.sample}_sort.bam",
         markdup_bam=lambda wc: f"output/PCR_done/{wc.method}/{wc.group}/{wc.sample}_markdup.bam",
         name_bam=lambda wc: f"output/PCR_done/{wc.method}/{wc.group}/{wc.sample}_fq.bam"
     shell:
         r"""
+        mkdir -p $(dirname {log})
+        exec > {log} 2>&1
         mkdir -p $(dirname {output.dedup_bam})
 
         samtools sort -@ {threads} -o {params.sorted_bam} {input.bam}
@@ -111,75 +130,89 @@ rule pcr_dedup:
         rm -f {params.name_bam}
         """
 
-# ---------------------------------------
-# Final assembly: control_assemble
-# uses filtered reads directly
 rule spades_control_assemble:
     input:
         r1=filtered_r1,
         r2=filtered_r2
     output:
-        directory("output/assemble/control_assemble/{method}/{group}/{sample}")
+        contigs="output/assemble/control_assemble/{method}/{group}/{sample}/contigs.fasta"
     threads: config["threads"]["spades_control"]
     conda:
-        "envs/metag.yaml"
+        "metag"
+    resources:
+        mem_mb=64000
+    log:
+        "logs/spades_control_assemble/{method}/{group}/{sample}.log"
+    params:
+        spades=config["software"]["spades"],
+        outdir=lambda wc: f"output/assemble/control_assemble/{wc.method}/{wc.group}/{wc.sample}"
     shell:
         r"""
-        mkdir -p {output}
-        spades.py --meta \
+        mkdir -p $(dirname {log})
+        exec > {log} 2>&1
+        rm -rf {params.outdir}
+        mkdir -p {params.outdir}
+        {params.spades} --meta \
           -1 {input.r1} \
           -2 {input.r2} \
           -k 21,33,55,77,99,127 \
           --only-assembler \
           -t {threads} \
-          -o {output}
-        test -s {output}/contigs.fasta
+          -o {params.outdir}
+        test -s {output.contigs}
         """
 
-# ---------------------------------------
-# Final assembly: PCR_assemble
-# uses PCR-deduplicated reads
 rule spades_pcr_assemble:
     input:
         r1="output/PCR_done/{method}/{group}/{sample}_1.fq.gz",
         r2="output/PCR_done/{method}/{group}/{sample}_2.fq.gz"
     output:
-        directory("output/assemble/PCR_assemble/{method}/{group}/{sample}")
+        contigs="output/assemble/PCR_assemble/{method}/{group}/{sample}/contigs.fasta"
     threads: config["threads"]["spades_pcr"]
     conda:
-        "envs/metag.yaml"
+        "metag"
+    resources:
+        mem_mb=64000
+    log:
+        "logs/spades_pcr_assemble/{method}/{group}/{sample}.log"
+    params:
+        spades=config["software"]["spades"],
+        outdir=lambda wc: f"output/assemble/PCR_assemble/{wc.method}/{wc.group}/{wc.sample}"
     shell:
         r"""
-        mkdir -p {output}
-        spades.py --meta \
+        mkdir -p $(dirname {log})
+        exec > {log} 2>&1
+        rm -rf {params.outdir}
+        mkdir -p {params.outdir}
+        {params.spades} --meta \
           -1 {input.r1} \
           -2 {input.r2} \
           -k 21,33,55,77,99,127 \
           --only-assembler \
           -t {threads} \
-          -o {output}
-        test -s {output}/contigs.fasta
+          -o {params.outdir}
+        test -s {output.contigs}
         """
 
-# ---------------------------------------
-# Keep contigs > 2000 bp
-# ---------------------------------------
 rule filter_contigs_r2000:
     input:
-        "output/assemble/{treat}/{method}/{group}/{sample}/contigs.fasta"
+        contigs="output/assemble/{treat}/{method}/{group}/{sample}/contigs.fasta"
     output:
-        "output/assemble/{treat}/{method}/{group}/{sample}/contigs_r2000bp.fasta"
+        filtered="output/assemble/{treat}/{method}/{group}/{sample}/contigs_r2000bp.fasta"
     conda:
-        "envs/metag.yaml"
-    run:
-        from Bio import SeqIO
-        seqs = [rec for rec in SeqIO.parse(input[0], "fasta") if len(rec.seq) > 2000]
-        with open(output[0], "w") as fh:
-            SeqIO.write(seqs, fh, "fasta-2line")
+        "metag"
+    resources:
+        mem_mb=4000
+    log:
+        "logs/filter_contigs_r2000/{treat}/{method}/{group}/{sample}.log"
+    shell:
+        r"""
+        mkdir -p $(dirname {log})
+        exec > {log} 2>&1
+        python -c "from Bio import SeqIO; seqs = [rec for rec in SeqIO.parse('{input.contigs}', 'fasta') if len(rec.seq) > 2000]; SeqIO.write(seqs, '{output.filtered}', 'fasta-2line')"
+        test -s {output.filtered}
+        """
 
-# ---------------------------------------
-# Build Bowtie2 index for final contigs
-# ---------------------------------------
 rule build_final_contig_index:
     input:
         contigs="output/assemble/{treat}/{method}/{group}/{sample}/contigs_r2000bp.fasta"
@@ -187,18 +220,21 @@ rule build_final_contig_index:
         done="output/assemble/{treat}/{method}/{group}/{sample}/bt2_index.done"
     threads: config["threads"]["bt2_build_contigs"]
     conda:
-        "envs/metag.yaml"
+        "metag"
+    resources:
+        mem_mb=8000
+    log:
+        "logs/build_final_contig_index/{treat}/{method}/{group}/{sample}.log"
     params:
         prefix=lambda wc: f"output/assemble/{wc.treat}/{wc.method}/{wc.group}/{wc.sample}/{wc.sample}_bw2"
     shell:
         r"""
+        mkdir -p $(dirname {log})
+        exec > {log} 2>&1
         bowtie2-build {input.contigs} {params.prefix}
         touch {output.done}
         """
 
-# ---------------------------------------
-# Remap reads back to final contigs for binning
-# ---------------------------------------
 rule remap_reads_to_final_contigs:
     input:
         idx_done="output/assemble/{treat}/{method}/{group}/{sample}/bt2_index.done",
@@ -209,12 +245,18 @@ rule remap_reads_to_final_contigs:
         bai="output/assemble/{treat}/{method}/{group}/{sample}/{sample}_sorted.bam.bai"
     threads: config["threads"]["remap_final_contigs"]
     conda:
-        "envs/metag.yaml"
+        "metag"
+    resources:
+        mem_mb=16000
+    log:
+        "logs/remap_reads_to_final_contigs/{treat}/{method}/{group}/{sample}.log"
     params:
         prefix=lambda wc: f"output/assemble/{wc.treat}/{wc.method}/{wc.group}/{wc.sample}/{wc.sample}_bw2",
         rawbam=lambda wc: f"output/assemble/{wc.treat}/{wc.method}/{wc.group}/{wc.sample}/{wc.sample}_raw.bam"
     shell:
         r"""
+        mkdir -p $(dirname {log})
+        exec > {log} 2>&1
         bowtie2 -p {threads} -x {params.prefix} -1 {input.r1} -2 {input.r2} \
           | samtools view -@ {threads} -bS - > {params.rawbam}
 
