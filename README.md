@@ -28,16 +28,51 @@ notebook and are not part of this workflow.
 ## Pipeline
 
 ```
-Raw reads
-  → host removal (bt2 | coverm | fastqs)
-  → MEGAHIT pre-assembly → samtools markdup → SPAdes   (PCR_assemble)
-  → SPAdes                                             (control_assemble)
-  → contigs ≥ 2000 bp → Bowtie2 re-mapping
-  → binning (UniT | COMEBin | MetaDecoder | SemiBin2)
-  → prepare_bins → RefineM → CheckM / GTDB-Tk
+Raw Reads (paired-end)
+|
+├── FastQ-Screen + fastp ──────────┐
+├── Bowtie2 → unmapped → FASTQ ────┤
+└── CoverM → inverse filter ───────┤
+                                    ▼
+                           Filtered Reads
+                                    │
+                    ┌───────────────┴───────────────┐
+                    │                               │
+              MEGAHIT pre-assembly            SPAdes meta assembly
+           (ref for PCR dedup)              (control – no dedup)
+                    │                               │
+              PCR deduplication                     │
+           (samtools markdup)                       │
+                    │                               │
+              SPAdes meta assembly                  │
+              (PCR-assemble)                        │
+                    │                               │
+                    └───────────┬───────────────────┘
+                                ▼
+                     contigs ≥ 2 000 bp
+                                │
+                        Bowtie2 re-mapping
+                                │
+          ┌──────────────┬──────┴──────┬──────────────────┐
+          ▼              ▼             ▼                  ▼
+       UniT          COMEBin      MetaDecoder         SemiBin2
+          │              │             │                  │
+          └──────────────┴──────┬──────┴──────────────────┘
+                                ▼
+                          RefineM
+                      (filter bins)
+                                │
+                    ┌───────────┴───────────┐
+                    ▼                       ▼
+              CheckM lineage_wf      GTDB-Tk classify_wf
+                    │                       │
+                    └───────────┬───────────┘
+                                ▼
+                          Kaiju taxonomy
+                         (on raw reads)
 ```
 
-Kaiju taxonomic profiling is disabled.
+Kaiju taxonomic profiling (the final node above) is disabled in this workflow.
 
 ## Requirements
 
