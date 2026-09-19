@@ -20,6 +20,20 @@ groups:
   - control
   - exp
 
+# dRep layer. `mimag` holds the MAG quality cutoffs and `drep` the ones handed
+# to dRep's own filter; the two must match (asserted in rules/drep.smk).
+mimag:
+  min_completeness: 50   # Bowers 2017 Nat Biotechnol PMID 28787424 (MIMAG medium-quality >= 50%)
+  max_contamination: 10  # same source; dRep compares with <=, so the paper text reads "<= 10%"
+drep:
+  min_completion: 50     # must equal mimag.min_completeness (asserted in rules/drep.smk)
+  max_contamination: 10  # must equal mimag.max_contamination (same assertion)
+  min_length: 0          # 0 disables the length filter (d_filter_wrapper only applies it when length > 1)
+  p_ani: 0.90            # primary (MASH) ANI threshold, dRep 3.6.2 default
+  s_ani: 0.95            # secondary ANI threshold (~95% ANI; PMID 19855009, 30504855)
+  cov_thresh: 0.1        # minimum aligned coverage for secondary comparisons, dRep 3.6.2 default
+  s_algorithm: fastANI   # passed explicitly; dRep 3.6.2 argparse default is fastANI (help text is stale)
+
 fastq_screen_conf:
   control: "/mnt/storage5/yfdai/fyp/database/configuration_fastas/control.conf"
   exp: "/mnt/storage5/yfdai/fyp/database/configuration_fastas/exp.conf"
@@ -45,12 +59,10 @@ gtdbtk_data: "/mnt/home-db/pub/gtdb/release214"
 # any conda environment.
 checkm_data: "/home-user/yfdai/profile/download/Anaconda3/envs/drep/checkm_data"
 
-# NOTE: Kaiju is currently disabled. Its rule is commented out in
-# rules/preprocess.smk and its target is absent from `rule all`.
-kaiju:
-  nodes: "/mnt/storage3/thliao/data/kaiju_db/nodes.dmp"
-  names: "/mnt/storage3/thliao/data/kaiju_db/names.dmp"
-  db: "/mnt/storage3/thliao/data/kaiju_db/kaiju_db_nr_euk.fmi"
+# NOTE: Kaiju is disabled (not a target of `rule all`; its rule is commented out
+# in rules/preprocess.smk). The former `kaiju:` DB paths and `threads.kaiju` were
+# removed so no orphan config keys remain; see the README for why it is disabled
+# and how to reinstate it (with the original paths) if needed.
 
 threads:
   fastq_screen: 16
@@ -75,4 +87,10 @@ threads:
   refinem: 64
   checkm: 96
   gtdbtk: 64
-  kaiju: 64
+  drep_pw: 8     # per-workflow pools are small; many can run concurrently
+  drep_xw: 36    # the single cross-workflow job is large
+
+# Memory declarations for the dRep rules (consumed by rules/drep.smk).
+resources:
+  drep_pw_mem_mb: 16000
+  drep_xw_mem_mb: 64000
