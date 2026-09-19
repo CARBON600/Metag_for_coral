@@ -119,8 +119,6 @@ dependencies:
   - libjpeg-turbo=2.1.4=h166bdaf_0
   - liblapack=3.9.0=31_h7ac8fdf_openblas
   - liblapacke=3.9.0=31_he2f377e_openblas
-  - liblzma=5.6.4=hb9d3cd8_0
-  - liblzma-devel=5.6.4=hb9d3cd8_0
   - libnghttp2=1.51.0=hdcd2b5c_0
   - libnsl=2.0.1=hd590300_0
   - libopenblas=0.3.29=pthreads_h94d23a6_0
@@ -274,8 +272,6 @@ dependencies:
   - xorg-xextproto=7.3.0=hb9d3cd8_1004
   - xorg-xproto=7.0.31=hb9d3cd8_1008
   - xz=5.2.6=h166bdaf_0
-  - xz-gpl-tools=5.6.4=hbcc6ac9_0
-  - xz-tools=5.6.4=hb9d3cd8_0
   - zipp=3.15.0=pyhd8ed1ab_0
   - zlib=1.2.13=h4ab18f5_6
   - zstd=1.5.6=ha6fb4c9_0

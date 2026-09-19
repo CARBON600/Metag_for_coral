@@ -36,7 +36,12 @@ dependencies:
   - xz-tools=5.8.1=hb9d3cd8_2
   - pip:
       - joblib==1.5.2
-      - metadecoder==1.2.1
+      # MetaDecoder is not published on PyPI (`pip install metadecoder` -> 404).
+      # Install the pinned GitHub release wheel instead.  The #sha256= fragment
+      # is the digest of metadecoder-1.2.1-py3-none-any.whl (5163065 bytes).
+      # Keep this as a URL: `conda env export` would otherwise rewrite it back to
+      # a bare `metadecoder==1.2.1` pin, which cannot be resolved.
+      - https://github.com/liu-congcong/MetaDecoder/releases/download/v1.2.1/metadecoder-1.2.1-py3-none-any.whl#sha256=1e1d0c70c7fc67f99edb4fde10f04e509dd4ad1f364d86d23bb6823d2d1a45d9
       - numpy==2.0.2
       - scikit-learn==1.6.1
       - scipy==1.13.1
