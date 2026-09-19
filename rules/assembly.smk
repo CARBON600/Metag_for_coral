@@ -13,18 +13,21 @@ rule megahit_pre:
         "logs/megahit_pre/{method}/{group}/{sample}.log"
     params:
         prefix=lambda wc: wc.sample,
-        outdir=lambda wc: f"output/megahit_pre/{wc.method}/{wc.group}/{wc.sample}"
+        outdir=lambda wc: f"output/megahit_pre/{wc.method}/{wc.group}/{wc.sample}",
+        tmpdir=config["tmpdir"]
     shell:
         r"""
         mkdir -p $(dirname {log})
         exec > {log} 2>&1
         rm -rf {params.outdir}
-        mkdir -p {params.outdir}
+        # MEGAHIT refuses to start when -o already exists (no --force is passed)
+        # and creates the directory itself, so do not pre-create it here.
         megahit \
           -1 {input.r1} \
           -2 {input.r2} \
           -o {params.outdir} \
           --out-prefix {params.prefix} \
+          --tmp-dir {params.tmpdir} \
           -t {threads} \
           --min-contig-len 250
         test -s {output.contigs}
@@ -49,7 +52,9 @@ rule build_megahit_bt2_index:
         mkdir -p $(dirname {log})
         exec > {log} 2>&1
         mkdir -p $(dirname {params.prefix})
+        rm -f {params.prefix}.*.bt2 {params.prefix}.*.bt2l
         bowtie2-build {input.contigs} {params.prefix}
+        test -s {params.prefix}.1.bt2 -o -s {params.prefix}.1.bt2l
         touch {output.done}
         """
 
@@ -76,6 +81,7 @@ rule remap_to_megahit_contigs:
         mkdir -p $(dirname {output.bam})
         bowtie2 -p {threads} -x {params.prefix} -1 {input.r1} -2 {input.r2} \
           | samtools view -@ {threads} -bS - > {output.bam}
+        test -s {output.bam}
         """
 
 rule pcr_dedup:
@@ -145,20 +151,28 @@ rule spades_control_assemble:
         "logs/spades_control_assemble/{method}/{group}/{sample}.log"
     params:
         spades=config["software"]["spades"],
-        outdir=lambda wc: f"output/assemble/control_assemble/{wc.method}/{wc.group}/{wc.sample}"
+        outdir=lambda wc: f"output/assemble/control_assemble/{wc.method}/{wc.group}/{wc.sample}",
+        tmpdir=config["tmpdir"]
     shell:
         r"""
         mkdir -p $(dirname {log})
         exec > {log} 2>&1
-        rm -rf {params.outdir}
-        mkdir -p {params.outdir}
+        # The SPAdes output dir is shared with the downstream contig-filter /
+        # index / remap rules, so it must NOT be wiped here.  Give SPAdes its own
+        # work subdir instead: wiping the shared dir deletes those downstream
+        # products and forces a full recompute.  SPAdes only warns on a
+        # non-empty output dir, so a private subdir is sufficient.
+        rm -rf {params.outdir}/spades_work
+        mkdir -p {params.outdir}/spades_work
         {params.spades} --meta \
           -1 {input.r1} \
           -2 {input.r2} \
           -k 21,33,55,77,99,127 \
           --only-assembler \
+          --tmp-dir {params.tmpdir} \
           -t {threads} \
-          -o {params.outdir}
+          -o {params.outdir}/spades_work
+        mv -f {params.outdir}/spades_work/contigs.fasta {output.contigs}
         test -s {output.contigs}
         """
 
@@ -177,20 +191,28 @@ rule spades_pcr_assemble:
         "logs/spades_pcr_assemble/{method}/{group}/{sample}.log"
     params:
         spades=config["software"]["spades"],
-        outdir=lambda wc: f"output/assemble/PCR_assemble/{wc.method}/{wc.group}/{wc.sample}"
+        outdir=lambda wc: f"output/assemble/PCR_assemble/{wc.method}/{wc.group}/{wc.sample}",
+        tmpdir=config["tmpdir"]
     shell:
         r"""
         mkdir -p $(dirname {log})
         exec > {log} 2>&1
-        rm -rf {params.outdir}
-        mkdir -p {params.outdir}
+        # The SPAdes output dir is shared with the downstream contig-filter /
+        # index / remap rules, so it must NOT be wiped here.  Give SPAdes its own
+        # work subdir instead: wiping the shared dir deletes those downstream
+        # products and forces a full recompute.  SPAdes only warns on a
+        # non-empty output dir, so a private subdir is sufficient.
+        rm -rf {params.outdir}/spades_work
+        mkdir -p {params.outdir}/spades_work
         {params.spades} --meta \
           -1 {input.r1} \
           -2 {input.r2} \
           -k 21,33,55,77,99,127 \
           --only-assembler \
+          --tmp-dir {params.tmpdir} \
           -t {threads} \
-          -o {params.outdir}
+          -o {params.outdir}/spades_work
+        mv -f {params.outdir}/spades_work/contigs.fasta {output.contigs}
         test -s {output.contigs}
         """
 
@@ -210,7 +232,10 @@ rule filter_contigs_r2000:
         mkdir -p $(dirname {log})
         exec > {log} 2>&1
         python -c "from Bio import SeqIO; seqs = [rec for rec in SeqIO.parse('{input.contigs}', 'fasta') if len(rec.seq) > 2000]; SeqIO.write(seqs, '{output.filtered}', 'fasta-2line')"
-        test -s {output.filtered}
+        if [ ! -s {output.filtered} ]; then
+            echo "ERROR: no contigs >2000bp for treat={wildcards.treat} method={wildcards.method} group={wildcards.group} sample={wildcards.sample}; assembly too fragmented to bin."
+            exit 1
+        fi
         """
 
 rule build_final_contig_index:
@@ -231,7 +256,9 @@ rule build_final_contig_index:
         r"""
         mkdir -p $(dirname {log})
         exec > {log} 2>&1
+        rm -f {params.prefix}.*.bt2 {params.prefix}.*.bt2l
         bowtie2-build {input.contigs} {params.prefix}
+        test -s {params.prefix}.1.bt2 -o -s {params.prefix}.1.bt2l
         touch {output.done}
         """
 

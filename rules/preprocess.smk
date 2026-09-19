@@ -12,14 +12,19 @@ rule check_inputs:
             config["tmpdir"],
             config["software"]["fastq_screen"],
             config["software"]["spades"],
-            config["gtdbtk_data"],
-            config["checkm_data"],
             config["fastq_screen_conf"]["control"],
             config["fastq_screen_conf"]["exp"],
             bowtie2_index_probe(config["bowtie2_index"]["control"]),
             bowtie2_index_probe(config["bowtie2_index"]["exp"]),
             config["coverm_ref"]["control"],
             config["coverm_ref"]["exp"],
+        ],
+        data_dir=config["data_dir"],
+        n_samples=lambda wc: len(SAMPLES),
+        tmpdir=config["tmpdir"],
+        conf_files=lambda wc: [
+            config["fastq_screen_conf"]["control"],
+            config["fastq_screen_conf"]["exp"],
         ]
     shell:
         r"""
@@ -33,6 +38,90 @@ rule check_inputs:
             echo "ERROR: missing required paths:$missing"
             exit 1
         fi
+        if [ "{params.n_samples}" -eq 0 ]; then
+            echo "ERROR: no paired-end samples matched {params.data_dir}/*_1.fq.gz"
+            exit 1
+        fi
+        if [ ! -d "{params.tmpdir}" ]; then
+            echo "ERROR: tmpdir is not a directory (MEGAHIT/SPAdes --tmp-dir need one): {params.tmpdir}"
+            exit 1
+        fi
+        # Content-level check: every aligner and DATABASE index named by a
+        # fastq_screen config must actually exist, not just the config file.
+        #
+        # Parse each line after stripping a trailing '#' comment and take the
+        # LAST remaining token as the path.  The official DATABASE form is
+        # "DATABASE <name> <index>" (3 fields), but a trailing comment would
+        # otherwise occupy field 3 and be mistaken for the index path.  This
+        # handles 2-field, 3-field and commented lines without relaxing the
+        # "index must exist" requirement.
+        #
+        # A missing DATABASE index is always fatal: letting it through only
+        # defers the failure by hours to the fastq_screen job.  Set
+        # SKIP_CONF_CHECK=1 to downgrade a broken third-party ALIGNER line from
+        # a hard stop to a warning.
+        _skip_conf=""
+        [ "${{SKIP_CONF_CHECK:-0}}" = "1" ] && _skip_conf=1
+        for conf in {params.conf_files}; do
+            if [ ! -e "$conf" ]; then echo "ERROR: fastq_screen conf missing: $conf"; exit 1; fi
+            _conf_rows="$(awk '{{ sub(/#.*/, ""); if ($1 == "") next; print $1, $NF }}' "$conf" || true)"
+            if [ -z "$_conf_rows" ]; then
+                echo "ERROR: fastq_screen conf parsed to zero entries (empty conf or awk failure?): $conf"
+                exit 1
+            fi
+            while read -r _kind _path; do
+                case "$_kind" in
+                    BOWTIE2|BOWTIE|BWA|BWAMEM|MINIMAP2)
+                        if [ ! -x "$_path" ]; then
+                            if [ -n "$_skip_conf" ]; then
+                                echo "WARN: aligner not executable ($conf): $_path (SKIP_CONF_CHECK=1)"
+                            else
+                                echo "ERROR: aligner not executable ($conf): $_path"; exit 1
+                            fi
+                        fi ;;
+                    DATABASE)
+                        if [ ! -e "$_path" ] && [ ! -e "$_path.1.bt2" ] && [ ! -e "$_path.1.bt2l" ]; then
+                            echo "ERROR: DATABASE index not found ($conf): $_path"; exit 1
+                        fi ;;
+                esac
+            done <<< "$_conf_rows"
+        done
+        mkdir -p $(dirname {output.marker})
+        touch {output.marker}
+        """
+
+# GTDB-Tk / CheckM reference data is only needed at the very end of the pipeline,
+# so it is gated separately and must not block host removal or assembly.
+rule check_qc_inputs:
+    output:
+        marker="output/check_qc_inputs.done"
+    resources:
+        mem_mb=1000
+    log:
+        "logs/check_qc_inputs.log"
+    params:
+        paths=lambda wc: [
+            config["gtdbtk_data"],
+            config["checkm_data"],
+        ]
+    shell:
+        r"""
+        mkdir -p $(dirname {log})
+        exec > {log} 2>&1
+        missing=""
+        for p in {params.paths}; do
+            if [ -e "$p" ]; then echo "OK   $p"; else echo "MISS $p"; missing="$missing $p"; fi
+        done
+        if [ -n "$missing" ]; then
+            echo "ERROR: missing required QC paths:$missing"
+            exit 1
+        fi
+        for p in {params.paths}; do
+            if [ ! -d "$p" ] || [ -z "$(ls -A "$p" 2>/dev/null)" ]; then
+                echo "ERROR: QC data directory missing or empty: $p"
+                exit 1
+            fi
+        done
         mkdir -p $(dirname {output.marker})
         touch {output.marker}
         """
@@ -61,10 +150,13 @@ rule fastq_screen:
         mkdir -p $(dirname {log})
         exec > {log} 2>&1
         mkdir -p {params.outdir}
+        rm -f {params.outdir}/{wildcards.sample}_1.fq.gz_temp_subset.fastq \
+              {params.outdir}/{wildcards.sample}_2.fq.gz_temp_subset.fastq
         {params.fastq_screen} \
           --conf {params.conf} \
           --outdir {params.outdir} \
           --nohits \
+          --force \
           --aligner bowtie2 \
           --threads {threads} \
           {input.r1} {input.r2}
@@ -126,6 +218,7 @@ rule bowtie2_map:
         mkdir -p $(dirname {output.bam})
         bowtie2 -p {threads} -x {params.index} -1 {input.r1} -2 {input.r2} \
           | samtools view -@ {threads} -bS - > {output.bam}
+        test -s {output.bam}
         """
 
 rule bowtie2_unmapped:
@@ -146,6 +239,7 @@ rule bowtie2_unmapped:
         exec > {log} 2>&1
         mkdir -p $(dirname {output.bam})
         samtools view -@ {threads} -b -f 4 {input.bam} > {output.bam}
+        test -s {output.bam}
         """
 
 rule bam_to_fastq_bt2:
@@ -210,8 +304,11 @@ rule coverm_map:
             -2 {input.r2} \
             -o {params.outdir} \
             -t {threads}
-        bam=$(find {params.outdir} -maxdepth 1 -name '*.bam' | head -n 1)
-        test -n "$bam"
+        bam=$(find {params.outdir} -maxdepth 1 -name '*.bam' | head -n 1 || true)
+        if [ -z "$bam" ]; then
+            echo "ERROR: 'coverm make' left no BAM in {params.outdir}; cannot continue (see the coverm output above)."
+            exit 1
+        fi
         mv "$bam" {output.bam}
         rm -rf {params.outdir}
         test -s {output.bam}
@@ -244,6 +341,7 @@ rule coverm_filter:
           --min-read-aligned-percent 0.75 \
           --min-read-percent-identity 0.95 \
           --threads {threads}
+        test -s {output.bam}
         """
 
 rule bam_to_fastq_coverm:
@@ -278,4 +376,5 @@ rule bam_to_fastq_coverm:
         """
 
 # Kaiju is disabled: no environment is shipped and the target is absent from
-# `rule all`. Its database paths remain in config.yaml (key: kaiju).
+# `rule all`. Its former config keys were removed; see the README for the
+# rationale and the DB paths needed to reinstate it.
