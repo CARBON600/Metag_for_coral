@@ -1,0 +1,18 @@
+cff-version: 1.2.0
+message: "If you use this workflow, please cite it using these metadata."
+title: "Standardizing a Bioinformatic Analysis Pipeline for Coral Metagenomics"
+abstract: >-
+  A Snakemake workflow for genome-resolved metagenomics of coral holobiont
+  samples: it removes coral host and Symbiodiniaceae reads, assembles the
+  remaining reads, recovers metagenome-assembled genomes (MAGs) with four
+  binners plus the metaWRAP ensemble arm, and assesses their quality and
+  taxonomy (CheckM, GTDB-Tk), followed by dRep dereplication.
+authors:
+  - family-names: DAI
+    given-names: Yifan
+    email: yidai204@gmail.com
+    # TODO: add `affiliation` and `orcid` when available.
+version: "1.2.2"
+license: GPL-3.0-or-later
+date-released: "2026-09-23"
+# TODO: add `repository-code` and `doi` once the repository has a public URL.

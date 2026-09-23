@@ -307,6 +307,13 @@ rule refinem_bins:
         bam="output/assemble/{treat}/{method}/{group}/{sample}/{sample}_sorted.bam"
     output:
         done="output/refinem/{binner}/{treat}/{method}/{group}/{sample}/refinem.done"
+    # RefineM filters scaffolds within a bin using the original assembly contigs
+    # and the remapped BAM. The metaWRAP arm's bins are per-bin SPAdes
+    # reassemblies whose contigs are absent from contigs_r2000bp.fasta and
+    # {sample}_sorted.bam, so RefineM does not apply; rules/metawrap.smk's
+    # metawrap_ingest provides refinem.done for that binner instead.
+    wildcard_constraints:
+        binner="unitem|comebin|metadecoder|semibin2_single",
     threads: config["threads"]["refinem"]
     conda:
         "binning"
@@ -396,12 +403,69 @@ rule checkm_lineage_wf:
         touch {output.done}
         """
 
+
+# `checkm lineage_wf` prints its out_format-2 QA table (the only place that
+# carries `Strain heterogeneity`, and a title-case `Marker lineage`) to stdout,
+# which lands in the rule log but NOT in storage/bin_stats_ext.tsv. This rule
+# re-derives that table as a declared output so tools/harvest_mags.py can read
+# it. It re-parses existing HMMER output only: no gene calling, no HMMER rerun.
+rule checkm_qa:
+    input:
+        "output/checkm/{binner}/{treat}/{method}/{group}/{sample}/checkm.done"
+    output:
+        "output/checkm/{binner}/{treat}/{method}/{group}/{sample}/results.tsv"
+    threads: config["threads"]["checkm_qa"]
+    conda:
+        "binning"
+    params:
+        outdir=lambda wc: f"output/checkm/{wc.binner}/{wc.treat}/{wc.method}/{wc.group}/{wc.sample}",
+        checkm_data=config["checkm_data"]
+    resources:
+        mem_mb=config["resources"]["checkm_qa_mem_mb"]
+    log:
+        "logs/checkm_qa/{binner}/{treat}/{method}/{group}/{sample}.log"
+    shell:
+        r"""
+        set -euo pipefail
+        mkdir -p $(dirname {log})
+        exec > {log} 2>&1
+        export CHECKM_DATA_PATH={params.checkm_data}
+        d={params.outdir}
+        # lineage_wf writes lineage.ms at the analysis root; accept it under
+        # storage/ too in case a CheckM build places it there.
+        ms="$(find "$d" -maxdepth 2 -name 'lineage.ms' | head -n 1 || true)"
+        if [ -z "$ms" ]; then
+          echo "WARNING: no lineage.ms under $d (empty CheckM branch); writing empty results.tsv"
+          : > {output}
+          exit 0
+        fi
+        # `checkm qa` calls getBinIdsFromOutDir(), which lists <analyze_dir>/bins;
+        # guard against a partially cleaned directory so this fails soft, not hard.
+        if [ ! -d "$d/bins" ]; then
+          echo "WARNING: no bins/ under $d; writing empty results.tsv"
+          : > {output}
+          exit 0
+        fi
+        checkm qa "$ms" "$d" -o 2 --tab_table -f {output} -t {threads}
+        test -s {output}
+        """
+
+
 rule gtdbtk_classify:
     input:
         "output/refinem/{binner}/{treat}/{method}/{group}/{sample}/refinem.done"
     output:
         done="output/gtdb/{binner}/{treat}/{method}/{group}/{sample}/gtdb.done"
     threads: config["threads"]["gtdbtk"]
+    # pplacer's memory is charged per forked thread: GTDB-Tk passes
+    # -j <--pplacer_cpus or --cpus>, and the host reports
+    # PARENT_MEMORY * (N_CHILDREN + 1) even though copy-on-write shares the pages.
+    # For the pinned ref data (2.3.2, r207/r214) the parent is ~55-61 GB
+    # (PPLACER_MIN_RAM_BAC_SPLIT); current ref data is ~140 GB.  A job killed for
+    # memory dies with PplacerException while the class-level *.out stops at
+    # "Preparing the edges for baseball..." with no error, so it is intermittent
+    # and node-dependent; one retry is worth more than a wider declaration.
+    retries: 1
     conda:
         "gtdbtk-2.3.2"
     params:
@@ -411,10 +475,10 @@ rule gtdbtk_classify:
         prefix=lambda wc: f"{wc.sample}_{wc.binner}",
         gtdbtk_data=config["gtdbtk_data"]
     resources:
-        # pplacer allocates ~60 GB for internal nodes (observed up to 61.4 GB in
-        # the logs); declare ~1.6x the observed peak so two GTDB-Tk jobs are not
-        # scheduled where only one fits.
-        mem_mb=96000
+        # pplacer is accounted as PARENT x (1 + pplacer_cpus); the pinned ref
+        # data (2.3.2, r207/r214) is ~55-61 GB per fork, current data ~140 GB.
+        # Declare ~2x so the scheduler does not co-schedule GTDB-Tk jobs.
+        mem_mb=config["resources"]["gtdbtk_mem_mb"]
     log:
         "logs/gtdbtk_classify/{binner}/{treat}/{method}/{group}/{sample}.log"
     shell:
@@ -432,13 +496,17 @@ rule gtdbtk_classify:
           touch {output.done}
           exit 0
         fi
+        # --pplacer_cpus 1 pins pplacer to a single fork (the official answer to the
+        # per-thread memory blow-up); --scratch_dir trades RAM for disk.
         gtdbtk classify_wf \
           --genome_dir {params.genomes} \
           --skip_ani_screen \
           --out_dir {params.outdir} \
           --extension {params.ext} \
           --prefix {params.prefix} \
-          --cpus {threads}
+          --cpus {threads} \
+          --pplacer_cpus 1 \
+          --scratch_dir {params.outdir}/scratch
 
         touch {output.done}
         """

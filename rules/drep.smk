@@ -47,7 +47,7 @@ rule drep_per_workflow:
         set -euo pipefail
         mkdir -p $(dirname {log})
         exec > {log} 2>&1
-        python scripts/drep_stage.py stage --mode per_workflow \
+        python tools/drep_stage.py stage --mode per_workflow \
           --mimag-bins {input.mimag} --output-dir output --workdir {params.wd} \
           --binner {wildcards.binner} --treat {wildcards.treat} \
           --method {wildcards.method} --group {wildcards.group} --sample {wildcards.sample}
@@ -57,10 +57,10 @@ rule drep_per_workflow:
             -pa {params.p_ani} -sa {params.s_ani} -nc {params.cov} \
             --S_algorithm {params.alg} \
             --genomeInfo {params.wd}/genomeInfo.csv -p {threads}
-          python scripts/drep_stage.py verify --log {params.wd}/log/logger.log \
+          python tools/drep_stage.py verify --log {params.wd}/log/logger.log \
             --derep-dir {params.wd}/dereplicated_genomes
         fi
-        python scripts/drep_stage.py summary --workdir {params.wd} \
+        python tools/drep_stage.py summary --workdir {params.wd} \
           --mimag-summary output/summary/mimag_summary.tsv \
           --binner {wildcards.binner} --treat {wildcards.treat} \
           --method {wildcards.method} --group {wildcards.group} --sample {wildcards.sample}
@@ -101,7 +101,7 @@ rule drep_cross_workflow:
         set -euo pipefail
         mkdir -p $(dirname {log})
         exec > {log} 2>&1
-        python scripts/drep_stage.py stage --mode cross_workflow \
+        python tools/drep_stage.py stage --mode cross_workflow \
           --mimag-bins {input.mimag} --output-dir output --workdir {params.wd}
         if [ "$(cat {params.wd}/status.txt)" = "dereplicated" ]; then
           dRep dereplicate {params.wd} -g {params.wd}/g_source.list \
@@ -109,7 +109,7 @@ rule drep_cross_workflow:
             -pa {params.p_ani} -sa {params.s_ani} -nc {params.cov} \
             --S_algorithm {params.alg} \
             --genomeInfo {params.wd}/genomeInfo.csv -p {threads}
-          python scripts/drep_stage.py verify --log {params.wd}/log/logger.log \
+          python tools/drep_stage.py verify --log {params.wd}/log/logger.log \
             --derep-dir {params.wd}/dereplicated_genomes
           test -s {output.bdb}
           test -s {output.cdb}
@@ -121,11 +121,7 @@ rule drep_cross_workflow:
 # Funnel table: one row per pool, reconciled against the passing-MAG list.
 rule drep_collect:
     input:
-        done=expand(
-            "output/drep_per_workflow/{binner}/{treat}/{method}/{group}/{sample}/derep.done",
-            binner=BINNERS, treat=ASSEMBLY_TREATS,
-            method=FILTER_METHODS, group=GROUPS, sample=SAMPLES
-        ),
+        done=combo_paths("drep_per_workflow", "derep.done"),
         mimag="output/summary/mimag_bins.tsv"
     output:
         per_workflow="output/drep_per_workflow/per_workflow.tsv"
@@ -139,7 +135,7 @@ rule drep_collect:
         r"""
         mkdir -p $(dirname {log})
         exec > {log} 2>&1
-        python scripts/drep_stage.py collect \
+        python tools/drep_stage.py collect \
           --per-workflow-root output/drep_per_workflow \
           --mimag-bins {input.mimag} --out {output.per_workflow}
         test -s {output.per_workflow}
@@ -165,7 +161,7 @@ rule drep_taxonomy:
         r"""
         mkdir -p $(dirname {log})
         exec > {log} 2>&1
-        python scripts/drep_stage.py taxonomy \
+        python tools/drep_stage.py taxonomy \
           --mimag-bins {input.mimag} --cdb {input.cdb} --wdb {input.wdb} \
           --manifest {input.manifest} --out {output.final}
         test -s {output.final}

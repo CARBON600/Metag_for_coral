@@ -6,7 +6,7 @@ import os
 _base = workflow.basedir.rstrip("/\\")
 if os.path.basename(_base) == "rules":
     _base = os.path.dirname(_base)
-_SCRIPT = os.path.join(_base, "scripts", "harvest_mags.py")
+_SCRIPT = os.path.join(_base, "tools", "harvest_mags.py")
 
 
 rule harvest:

@@ -22,27 +22,63 @@ cd "$(dirname "$0")"
 # Export the configured scratch directory so every tool that honours $TMPDIR
 # (samtools, CheckM, GTDB-Tk, ...) uses it instead of node-local /tmp. MEGAHIT
 # and SPAdes are additionally given --tmp-dir explicitly in their rules.
-tmpdir="$(awk -F'"' '/^tmpdir:/{print $2; exit}' config.yaml || true)"
+# Accept both `tmpdir: "/path"` and `tmpdir: /path` (plus a trailing comment) so a
+# forgotten pair of quotes cannot silently disable $TMPDIR. A `#` inside the path
+# would still be treated as a comment.
+tmpdir="$(awk '
+    /^tmpdir:/ {
+        v = $0
+        sub(/^[^:]*:[ \t]*/, "", v)   # drop the "tmpdir:" key
+        sub(/[ \t]*#.*$/, "", v)      # drop a trailing comment
+        gsub(/"/, "", v)              # drop surrounding quotes
+        sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
+        print v
+        exit
+    }' config.yaml || true)"
 if [ -n "${tmpdir}" ]; then
     export TMPDIR="${tmpdir}"
 else
-    echo "WARN: could not parse 'tmpdir' from config.yaml (expected: tmpdir: \"/path\"); TMPDIR not set." >&2
+    echo "WARN: could not parse 'tmpdir' from config.yaml (expected: tmpdir: \"/path\" or tmpdir: /path); TMPDIR not set." >&2
 fi
 
-ENVS=(metag megahit binning comebin_env metadecoder SemiBin gtdbtk-2.3.2 drep)
+ENVS=(metag megahit binning comebin_env metadecoder SemiBin gtdbtk-2.3.2 drep metawrap-env)
 
 # Pin which conda installation is used: the same named env may exist under more
 # than one Anaconda install, and a tool (e.g. bowtie2) resolved inside an env can
-# otherwise come from a different install. Override via the CONDA_BASE variable.
-CONDA_BASE="${CONDA_BASE:-/home-user/yfdai/profile/download/Anaconda3}"
-if [ -f "${CONDA_BASE}/etc/profile.d/conda.sh" ]; then
+# otherwise come from a different install. Prefer the conda already on PATH, then
+# an explicit $CONDA_BASE. There is deliberately no hardcoded fallback: a
+# machine-specific path here would silently select the wrong install (or none).
+if [ -z "${CONDA_BASE:-}" ] && command -v conda >/dev/null 2>&1; then
+    CONDA_BASE="$(conda info --base 2>/dev/null || true)"
+fi
+if [ -n "${CONDA_BASE:-}" ] && [ -f "${CONDA_BASE}/etc/profile.d/conda.sh" ]; then
     # shellcheck disable=SC1090
     source "${CONDA_BASE}/etc/profile.d/conda.sh"
 fi
 
 if ! command -v conda >/dev/null 2>&1; then
-    echo "ERROR: 'conda' not found in PATH; activate your conda base/snakemake env first." >&2
+    echo "ERROR: 'conda' not found in PATH; activate your conda base/snakemake env first, or export CONDA_BASE=/path/to/miniconda3." >&2
     exit 1
+fi
+
+# The pipeline runs *under* Snakemake, so the driver environment has to be active
+# already. Its pinned specification is envs/snakemake.yml; the expected version is
+# read from that file rather than repeated here, so the pin has one home.
+DRIVER_SPEC="${PWD}/envs/snakemake.yml"
+if ! command -v snakemake >/dev/null 2>&1; then
+    echo "ERROR: 'snakemake' not found in PATH. Create and activate the driver environment first:" >&2
+    echo "         mamba env create -f ${DRIVER_SPEC}" >&2
+    echo "         conda activate snakemake" >&2
+    exit 1
+fi
+snak_pin="$(awk -F= '/^  - snakemake=/{print $2; exit}' "${DRIVER_SPEC}" 2>/dev/null || true)"
+snak_run="$(snakemake --version 2>/dev/null || true)"
+if [ -n "${snak_pin}" ] && [ -n "${snak_run}" ] && [ "${snak_pin}" != "${snak_run}" ]; then
+    echo "WARN: active Snakemake ${snak_run} != ${snak_pin} pinned in envs/snakemake.yml." >&2
+elif [ -n "${snak_pin}" ] && [ -n "${snak_run}" ]; then
+    echo "[run.sh] driver: snakemake ${snak_run} (= envs/snakemake.yml)"
+else
+    echo "[run.sh] note: could not read the snakemake pin from ${DRIVER_SPEC}." >&2
 fi
 
 cv="$(conda --version 2>/dev/null | awk '{print $2}' || true)"

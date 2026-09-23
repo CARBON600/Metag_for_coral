@@ -1,9 +1,9 @@
-# Pipeline configuration (template).
+# Pipeline configuration (annotated template).
 #
-# This tracked copy ships with placeholders so a checkout can be committed
-# without leaking private paths; fill the 12 machine-specific paths below before
-# running. `config.example.yaml` is the same file with the same placeholders and
-# the same comments; keep the two in sync when either changes.
+# Copy this file to `config.yaml` and fill the 12 machine-specific paths below
+# before running:  cp config.example.yaml config.yaml
+# `config.yaml` ships with the same placeholders and comments, so the two are
+# interchangeable; keep them in sync when either changes.
 #
 # Paths to fill (12):
 #   1  data_dir                     raw paired-end reads ({sample}_1.fq.gz / _2.fq.gz)
